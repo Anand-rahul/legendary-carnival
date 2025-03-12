@@ -39,7 +39,8 @@ public class ChatController {
                 +"The Tone of the script should be "+detailPromptRequest.getTone() +"\n"+
                 "The Story Style should be "+detailPromptRequest.getStoryStyle()+"\n"+
                 "The Emotional Keywords are "+detailPromptRequest.getEmotionalKeywords()+"\n"+
-                "The Retention Keywords are "+detailPromptRequest.getRetentionKeywords()+"\n"+"The Call to Action is "+detailPromptRequest.getCallToAction();
+                "The Retention Keywords are "+detailPromptRequest.getRetentionKeywords()+"\n"+"The Call to Action is "+detailPromptRequest.getCallToAction()+"\n"+
+                "Keep the Script in third Person Perspective as if a narrator is explaining the things properly";
         return ResponseEntity.ok(aiCompletionService.getContextualChat(detailPromptRequest.getUserId(), detailPromptRequest.getChatGuidStr(), detailedPrompt));
     }
 
