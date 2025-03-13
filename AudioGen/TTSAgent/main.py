@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from typing import List
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 import torch
 import numpy as np
@@ -23,33 +24,38 @@ app = FastAPI()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model = build_model(DEFAULT_MODEL_PATH, device)
 
-class TTSRequest(BaseModel):
+class Section(BaseModel):
     text: str
-    voice: str
-    speed: float = 1.0
+    speed: float
+
+class TTSRequest(BaseModel):
+    sections: List[Section]
 
 @app.get("/voices")
 def get_available_voices():
     """Endpoint to list available voices."""
     return {"voices": list_available_voices()}
 
-@app.post("/generate")
-def generate_tts(request: TTSRequest):
+@app.post("/generate/{voice}")
+def generate_tts(voice: str, request: TTSRequest):
     """Generate speech from text."""
-    if request.speed < 0.5 or request.speed > 2.0:
-        raise HTTPException(status_code=400, detail="Speed must be between 0.5 and 2.0")
-    
     voices = list_available_voices()
-    if request.voice not in voices:
+    if voice not in voices:
         raise HTTPException(status_code=400, detail="Invalid voice selection")
-    
+
     all_audio = []
-    generator = model(request.text, voice=f"voices/{request.voice}.pt", speed=request.speed, split_pattern=r'\n+')
     
-    for _, _, audio in generator:
-        if isinstance(audio, np.ndarray):
-            audio = torch.from_numpy(audio).float()
-        all_audio.append(audio)
+    # Process each section separately
+    for section in request.sections:
+        if section.speed < 0.5 or section.speed > 2.0:
+            raise HTTPException(status_code=400, detail="Speed must be between 0.5 and 2.0")
+
+        generator = model(section.text, voice=f"voices/{voice}.pt", speed=section.speed, split_pattern=r'\n+')
+
+        for _, _, audio in generator:
+            if isinstance(audio, np.ndarray):
+                audio = torch.from_numpy(audio).float()
+            all_audio.append(audio)
     
     if not all_audio:
         raise HTTPException(status_code=500, detail="Failed to generate audio")
@@ -58,4 +64,4 @@ def generate_tts(request: TTSRequest):
     output_path = Path(DEFAULT_OUTPUT_FILE)
     audio_file_path = save_audio(final_audio.numpy(), SAMPLE_RATE, output_path)
     
-    return {"audio_file": audio_file_path}
+    return {"audio_file": str(audio_file_path)}

@@ -8,6 +8,10 @@ import com.Ai.StoryGen.Repository.ChatSessionRepository;
 import com.Ai.StoryGen.Repository.MessageRepository;
 import com.Ai.StoryGen.Repository.SingularChatRepository;
 import com.Ai.StoryGen.Repository.UserRepository;
+import com.Ai.StoryGen.dto.AudioSectionJson;
+import com.Ai.StoryGen.dto.ContextualChatResponse;
+import com.Ai.StoryGen.dto.Sections;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
@@ -61,9 +65,8 @@ public class AiCompletionService {
                 }).thenReturn(response));
     }
 
-    public Mono<String> getContextualChat(long userId, String chatGuidStr, String prompt) {
+    public Mono<ContextualChatResponse> getContextualChat(long userId, String chatGuidStr, String prompt) {
         UUID chatGuid = UUID.fromString(chatGuidStr);
-
         ChatSession chatSession = chatSessionRepository.findByGuid(chatGuid)
                 .orElseGet(() -> {
                     ChatSession newSession = new ChatSession();
@@ -111,6 +114,66 @@ public class AiCompletionService {
                         chatSession.setUpdatedAt(Instant.now());
                         chatSessionRepository.save(chatSession);
                     }).thenReturn(response);
+                }).map(response -> new ContextualChatResponse(chatGuidStr, response));
+    }
+    public Mono<AudioSectionJson> getOutputAsAudioJson(long userId, String chatGuidStr, String prompt) {
+        UUID chatGuid = UUID.fromString(chatGuidStr);
+        ChatSession chatSession = chatSessionRepository.findByGuid(chatGuid)
+                .orElseGet(() -> {
+                    ChatSession newSession = new ChatSession();
+                    newSession.setGuid(chatGuid);
+                    newSession.setUserId(userId);
+                    newSession.setTitle("New Chat Session");
+                    newSession.setCreatedAt(Instant.now());
+                    newSession.setUpdatedAt(Instant.now());
+                    return chatSessionRepository.save(newSession);
+                });
+
+        List<Message> chatMessages = messageRepository.findByChatGuidOrderByTimestamp(chatGuid);
+        List<Map<String, Object>> messages = new ArrayList<>();
+
+        messages.add(Map.of("role", "system", "content", "You are an AI storyteller."));
+        for (Message message : chatMessages) {
+            messages.add(Map.of("role", message.getMessageType(), "content", message.getMessageText()));
+        }
+        messages.add(Map.of("role", "user", "content", prompt));
+
+        Map<String, Object> requestBody = Map.of(
+                "model", modelName,
+                "messages", messages
+        );
+
+        return sendRequest(requestBody)
+                .flatMap(response -> {
+                    Message userMessage = new Message();
+                    userMessage.setChatGuid(chatGuid);
+                    userMessage.setUserId(userId);
+                    userMessage.setMessageType("user");
+                    userMessage.setMessageText(prompt);
+                    userMessage.setTimestamp(Instant.now());
+
+                    Message aiMessage = new Message();
+                    aiMessage.setChatGuid(chatGuid);
+                    aiMessage.setUserId(userId);
+                    aiMessage.setMessageType("assistant");
+                    aiMessage.setMessageText(response);
+                    aiMessage.setTimestamp(Instant.now());
+
+                    messageRepository.save(userMessage);
+                    messageRepository.save(aiMessage);
+                    chatSession.setUpdatedAt(Instant.now());
+                    chatSessionRepository.save(chatSession);
+
+                    return Mono.just(response);
+                })
+                .map(response -> {
+                    try {
+                        System.out.println(response);
+                        ObjectMapper objectMapper = new ObjectMapper();
+                        return objectMapper.readValue(response, AudioSectionJson.class);
+                    } catch (Exception e) {
+                        throw new RuntimeException("Failed to parse AI response to AudioSectionJson", e);
+                    }
                 });
     }
 
